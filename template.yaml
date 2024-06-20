@@ -1,0 +1,108 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: My Serverless Application
+Resources:
+  MyS3Bucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: 'my-serverless-task-bucket-papila-ue1'
+
+      NotificationConfiguration:
+        QueueConfigurations:
+          - Event: 's3:ObjectCreated:*'
+            Queue: !GetAtt MySQSQueue.Arn
+
+  # SQS Queue
+  MySQSQueue:
+    Type: 'AWS::SQS::Queue'
+    Properties:
+      QueueName: 'my-serverless-task-queue'
+
+  MySQSQueuePolicy:
+    Type: 'AWS::SQS::QueuePolicy'
+    Properties:
+      Queues:
+        - !Ref MySQSQueue
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 's3.amazonaws.com'
+            Action: 'sqs:*'
+            Resource: !GetAtt MySQSQueue.Arn
+            Condition:
+              ArnLike:
+                aws:SourceArn: 'arn:aws:s3:::my-serverless-task-bucket-papila-ue1'
+
+
+  # SNS Topic
+  MySNSTopic:
+    Type: 'AWS::SNS::Topic'
+    Properties:
+      TopicName: 'my-serverless-task-sns'
+
+  MySNSTopicSubscription:
+    Type: 'AWS::SNS::Subscription'
+    Properties:
+      Protocol: email
+      Endpoint: papila.ghising@adex.ltd
+      TopicArn: !Ref MySNSTopic    
+
+
+  MyLambdaFunction:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      CodeUri: lambda-code/
+      Handler: app.lambda_handler
+      Runtime: python3.10
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          SNS_TOPIC_ARN: !Ref MySNSTopic
+      Events:
+        SQSEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt MySQSQueue.Arn
+
+  LambdaExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: LambdaSQSPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource: !GetAtt MySQSQueue.Arn
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource: !Ref MySNSTopic
+
+
+Outputs:
+  S3BucketName:
+    Description: 'Name of the S3 bucket'
+    Value: !Ref MyS3Bucket
+  SQSQueueName:
+    Description: 'Name of the SQS queue'
+    Value: !Ref MySQSQueue
+  SNSTopicArn:
+    Description: 'ARN of the SNS topic'
+    Value: !Ref MySNSTopic
+  LambdaFunctionName:
+    Description: 'Name of the Lambda function'
+    Value: !Ref MyLambdaFunction
